@@ -1,0 +1,89 @@
+# ─── Node Affinity Example ───
+# Schedule pharmacy pods ONLY on nodes labeled: workload=backend
+# Use: kubectl label node <node-name> workload=backend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pharmacy-with-affinity
+  namespace: backend
+  labels:
+    app: pharmacy
+    experiment: node-affinity
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pharmacy
+      experiment: node-affinity
+  template:
+    metadata:
+      labels:
+        app: pharmacy
+        experiment: node-affinity
+    spec:
+      affinity:
+        # Node Affinity: schedule only on nodes with workload=backend
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: workload
+                    operator: In
+                    values:
+                      - backend
+        # Pod Anti-Affinity: don't put 2 pharmacy pods on same node
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - pharmacy
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: pharmacy
+          image: revanth654/healthcare-pharmacy:latest
+          ports:
+            - containerPort: 5001
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+# ─── NodeSelector Example ───
+# Simplest form: nodeSelector field
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aggregator-with-nodeselector
+  namespace: backend
+  labels:
+    app: aggregator
+    experiment: nodeselector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aggregator
+      experiment: nodeselector
+  template:
+    metadata:
+      labels:
+        app: aggregator
+        experiment: nodeselector
+    spec:
+      # Simple nodeSelector — requires label: disk=ssd on node
+      # kubectl label node <node-name> disk=ssd
+      nodeSelector:
+        disk: ssd
+      containers:
+        - name: aggregator
+          image: revanth654/healthcare-aggregator:latest
+          ports:
+            - containerPort: 3005

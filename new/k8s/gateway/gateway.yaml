@@ -1,0 +1,19 @@
+# ─── Gateway ───
+# Listens on port 80, exposed via NodePort 30080 for HAProxy to reach
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: healthcare-gateway
+  namespace: ingress
+  annotations:
+    # Expose the Gateway as NodePort on port 30080
+    gateway.envoyproxy.io/service-type: NodePort
+spec:
+  gatewayClassName: healthcare-gateway-class
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All

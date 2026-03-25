@@ -1,0 +1,83 @@
+# ─── Taints and Tolerations Example ───
+# Step 1: Taint a node
+#   kubectl taint nodes <node-name> dedicated=infra:NoSchedule
+#
+# Step 2: Only pods with matching toleration can schedule on that node.
+# This example shows MongoDB that TOLERATES the infra taint.
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb-with-toleration
+  namespace: infra
+  labels:
+    app: mongodb
+    experiment: taints-tolerations
+spec:
+  serviceName: mongodb-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+      experiment: taints-tolerations
+  template:
+    metadata:
+      labels:
+        app: mongodb
+        experiment: taints-tolerations
+    spec:
+      # Toleration: allows scheduling on nodes with dedicated=infra:NoSchedule taint
+      tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "infra"
+          effect: "NoSchedule"
+      # Also use nodeSelector to target the infra node
+      nodeSelector:
+        node-role: infra
+      containers:
+        - name: mongodb
+          image: mongo:7.0
+          ports:
+            - containerPort: 27017
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+# ─── Another example: NoExecute toleration ───
+# NoExecute taints evict existing pods. This toleration keeps the pod for 60s.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-management-noexecute
+  namespace: backend
+  labels:
+    app: user-management
+    experiment: noexecute-toleration
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-management
+      experiment: noexecute-toleration
+  template:
+    metadata:
+      labels:
+        app: user-management
+        experiment: noexecute-toleration
+    spec:
+      tolerations:
+        - key: "maintenance"
+          operator: "Equal"
+          value: "true"
+          effect: "NoExecute"
+          tolerationSeconds: 60 # Stay on the node for 60s after taint applied
+      containers:
+        - name: user-management
+          image: revanth654/healthcare-user-management:latest
+          ports:
+            - containerPort: 3001

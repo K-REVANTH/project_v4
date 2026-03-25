@@ -1,0 +1,135 @@
+# ─── HTTPRoutes for all backend services ───
+# Path-based routing: /api/<service>/* → corresponding ClusterIP service
+
+# User Management
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: user-management-route
+  namespace: backend
+spec:
+  parentRefs:
+    - name: healthcare-gateway
+      namespace: ingress
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/users
+      backendRefs:
+        - name: user-management
+          port: 3001
+---
+# Doctor Appointment
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: doctor-appointment-route
+  namespace: backend
+spec:
+  parentRefs:
+    - name: healthcare-gateway
+      namespace: ingress
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/doctors
+      backendRefs:
+        - name: doctor-appointment
+          port: 3002
+---
+# Pharmacy
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: pharmacy-route
+  namespace: backend
+spec:
+  parentRefs:
+    - name: healthcare-gateway
+      namespace: ingress
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/pharmacy
+      backendRefs:
+        - name: pharmacy
+          port: 5001
+---
+# Medical Records
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: medical-records-route
+  namespace: backend
+spec:
+  parentRefs:
+    - name: healthcare-gateway
+      namespace: ingress
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/records
+      backendRefs:
+        - name: medical-records
+          port: 5002
+---
+# Lab Appointment
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: lab-appointment-route
+  namespace: backend
+spec:
+  parentRefs:
+    - name: healthcare-gateway
+      namespace: ingress
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/labs
+      backendRefs:
+        - name: lab-appointment
+          port: 3003
+---
+# Ambulance Booking
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ambulance-booking-route
+  namespace: backend
+spec:
+  parentRefs:
+    - name: healthcare-gateway
+      namespace: ingress
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/ambulance
+      backendRefs:
+        - name: ambulance-booking
+          port: 3004
+---
+# Aggregator
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: aggregator-route
+  namespace: backend
+spec:
+  parentRefs:
+    - name: healthcare-gateway
+      namespace: ingress
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/aggregator
+      backendRefs:
+        - name: aggregator
+          port: 3005

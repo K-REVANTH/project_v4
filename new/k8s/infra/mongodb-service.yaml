@@ -1,0 +1,33 @@
+# ─── MongoDB Headless Service (for StatefulSet DNS) ───
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-headless
+  namespace: infra
+  labels:
+    app: mongodb
+spec:
+  clusterIP: None
+  selector:
+    app: mongodb
+  ports:
+    - port: 27017
+      targetPort: 27017
+      name: mongo
+---
+# ─── MongoDB ClusterIP Service (for general access) ───
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: infra
+  labels:
+    app: mongodb
+spec:
+  type: ClusterIP
+  selector:
+    app: mongodb
+  ports:
+    - port: 27017
+      targetPort: 27017
+      name: mongo

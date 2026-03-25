@@ -1,0 +1,34 @@
+# ─── Backend ConfigMap ───
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: backend
+data:
+  MONGO_URI: "mongodb://mongodb-0.mongodb-headless.infra.svc.cluster.local:27017"
+  RABBITMQ_URL: "amqp://rabbitmq.infra.svc.cluster.local:5672"
+  JWT_EXPIRY: "24h"
+  # Service discovery URLs (used by aggregator)
+  DOCTOR_SERVICE_URL: "http://doctor-appointment.backend.svc.cluster.local:3002"
+  PHARMACY_SERVICE_URL: "http://pharmacy.backend.svc.cluster.local:5001"
+  LAB_SERVICE_URL: "http://lab-appointment.backend.svc.cluster.local:3003"
+---
+# ─── Infra ConfigMap ───
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: infra-config
+  namespace: infra
+data:
+  MONGO_INITDB_DATABASE: "healthcare"
+  RABBITMQ_DEFAULT_USER: "guest"
+  RABBITMQ_DEFAULT_PASS: "guest"
+---
+# ─── Frontend ConfigMap ───
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: frontend
+data:
+  VITE_API_BASE: ""
