@@ -1,0 +1,119 @@
+# ─── Lab Appointment Deployment ───
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab-appointment
+  namespace: backend
+  labels:
+    app: lab-appointment
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: lab-appointment
+  template:
+    metadata:
+      labels:
+        app: lab-appointment
+        tier: backend
+    spec:
+      containers:
+        - name: lab-appointment
+          image: revanth654/healthcare-lab-appointment:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3003
+          env:
+            - name: PORT
+              value: "3003"
+            - name: MONGO_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: MONGO_URI
+            - name: RABBITMQ_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: RABBITMQ_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3003
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3003
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      restartPolicy: Always
+---
+# ─── Ambulance Booking Deployment ───
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ambulance-booking
+  namespace: backend
+  labels:
+    app: ambulance-booking
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ambulance-booking
+  template:
+    metadata:
+      labels:
+        app: ambulance-booking
+        tier: backend
+    spec:
+      containers:
+        - name: ambulance-booking
+          image: revanth654/healthcare-ambulance-booking:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3004
+          env:
+            - name: PORT
+              value: "3004"
+            - name: MONGO_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: MONGO_URI
+            - name: RABBITMQ_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: RABBITMQ_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      restartPolicy: Always

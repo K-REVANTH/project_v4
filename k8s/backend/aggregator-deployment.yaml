@@ -1,0 +1,64 @@
+# ─── Aggregator Deployment ───
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aggregator
+  namespace: backend
+  labels:
+    app: aggregator
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aggregator
+  template:
+    metadata:
+      labels:
+        app: aggregator
+        tier: backend
+    spec:
+      containers:
+        - name: aggregator
+          image: revanth654/healthcare-aggregator:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3005
+          env:
+            - name: PORT
+              value: "3005"
+            - name: DOCTOR_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: DOCTOR_SERVICE_URL
+            - name: PHARMACY_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: PHARMACY_SERVICE_URL
+            - name: LAB_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: LAB_SERVICE_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3005
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3005
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      restartPolicy: Always
