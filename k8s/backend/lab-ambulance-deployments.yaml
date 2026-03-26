@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: lab-appointment
-          image: revanth654/healthcare-lab-appointment:latest
+          image: revanth654/healthcare-lab-appointment:v2
           imagePullPolicy: Always
           ports:
             - containerPort: 3003
@@ -80,7 +80,7 @@ spec:
     spec:
       containers:
         - name: ambulance-booking
-          image: revanth654/healthcare-ambulance-booking:latest
+          image: revanth654/healthcare-ambulance-booking:v2
           imagePullPolicy: Always
           ports:
             - containerPort: 3004

@@ -6,7 +6,16 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   phone: { type: String },
-  role: { type: String, enum: ['patient', 'admin'], default: 'patient' },
+  role: {
+    type: String,
+    enum: ['patient', 'doctor', 'admin'],
+    default: 'patient'
+  },
+  // Doctor-specific fields (populated only when role === 'doctor')
+  specialization: { type: String, default: '' },
+  hospitalId: { type: String, default: '' },
+  hospitalName: { type: String, default: '' },
+  licenseNumber: { type: String, default: '' },
   notifications: [
     {
       message: String,
@@ -24,6 +33,13 @@ userSchema.pre('save', async function (next) {
 
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
+};
+
+// Strip password from JSON output
+userSchema.methods.toSafeObject = function () {
+  const obj = this.toObject();
+  delete obj.password;
+  return obj;
 };
 
 module.exports = mongoose.model('User', userSchema);

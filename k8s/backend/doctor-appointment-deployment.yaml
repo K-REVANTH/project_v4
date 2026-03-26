@@ -1,4 +1,22 @@
-# ─── Doctor Appointment Deployment ───
+# ════════════════════════════════════════════════════
+# Multi-Container Pod — Sidecar Logging Pattern
+# ════════════════════════════════════════════════════
+#
+# WHY: In production, you need to collect application logs
+# without modifying the app itself. The sidecar pattern:
+# - Main container writes logs to a shared volume
+# - Sidecar container reads those logs and forwards them
+#   (to a central logging system like Elasticsearch, or just stdout for demo)
+#
+# HOW:
+# - Both containers share an emptyDir volume mounted at /var/log/app
+# - The main app (doctor-appointment) writes structured logs to a file
+# - The sidecar (log-forwarder) tails the log file and prints to stdout
+# - kubectl logs can then read either container's output
+#
+# In production, the sidecar would be Fluentd or Fluent Bit
+# forwarding to Elasticsearch/Loki instead of just stdout.
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,9 +36,22 @@ spec:
         app: doctor-appointment
         tier: backend
     spec:
+      initContainers:
+        - name: wait-for-mongodb
+          image: busybox:1.36
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z mongodb-headless.infra.svc.cluster.local 27017; do sleep 2; done",
+            ]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }
       containers:
+        # ─── Main Application Container ───
         - name: doctor-appointment
-          image: revanth654/healthcare-doctor-appointment:latest
+          image: revanth654/healthcare-doctor-appointment:v2
           imagePullPolicy: Always
           ports:
             - containerPort: 3002
@@ -37,6 +68,13 @@ spec:
                 configMapKeyRef:
                   name: backend-config
                   key: RABBITMQ_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: JWT_SECRET
+            - name: LOG_FILE
+              value: "/var/log/app/doctor-appointment.log"
           resources:
             requests:
               cpu: 100m
@@ -56,4 +94,32 @@ spec:
               port: 3002
             initialDelaySeconds: 10
             periodSeconds: 5
+          volumeMounts:
+            - name: app-logs
+              mountPath: /var/log/app
+
+        # ─── Sidecar: Log Forwarder ───
+        - name: log-forwarder
+          image: busybox:1.36
+          command:
+            [
+              "sh",
+              "-c",
+              "touch /var/log/app/doctor-appointment.log && tail -F /var/log/app/doctor-appointment.log",
+            ]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - name: app-logs
+              mountPath: /var/log/app
+              readOnly: true
+
+      volumes:
+        - name: app-logs
+          emptyDir: {} # Shared ephemeral volume — lifecycle tied to the pod
       restartPolicy: Always

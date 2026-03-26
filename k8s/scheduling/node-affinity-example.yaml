@@ -61,21 +61,21 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: aggregator-with-nodeselector
+  name: lab-appointment-with-nodeselector
   namespace: backend
   labels:
-    app: aggregator
+    app: lab-appointment
     experiment: nodeselector
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: aggregator
+      app: lab-appointment
       experiment: nodeselector
   template:
     metadata:
       labels:
-        app: aggregator
+        app: lab-appointment
         experiment: nodeselector
     spec:
       # Simple nodeSelector — requires label: disk=ssd on node
@@ -83,7 +83,7 @@ spec:
       nodeSelector:
         disk: ssd
       containers:
-        - name: aggregator
-          image: revanth654/healthcare-aggregator:latest
+        - name: lab-appointment
+          image: revanth654/healthcare-lab-appointment:v2
           ports:
-            - containerPort: 3005
+            - containerPort: 3003

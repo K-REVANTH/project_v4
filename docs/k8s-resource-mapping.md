@@ -1,45 +1,60 @@
-# Kubernetes Resource Mapping
+# Kubernetes Resource Mapping (v2)
 
 ## Component → Resource Mapping
 
-| Component | K8s Resource | Namespace | YAML File | Notes |
-|-----------|-------------|-----------|-----------|-------|
-| MongoDB | StatefulSet (1 replica) | `infra` | `k8s/infra/mongodb-statefulset.yaml` | Headless Service for stable DNS |
-| MongoDB Data | PV + PVC (5Gi, hostPath) | `infra` | `k8s/infra/mongodb-pv-pvc.yaml` | `storageClassName: manual` |
-| MongoDB | Headless + ClusterIP Service | `infra` | `k8s/infra/mongodb-service.yaml` | `mongodb-0.mongodb-headless.infra.svc` |
-| RabbitMQ | Deployment (1 replica) | `infra` | `k8s/infra/rabbitmq-deployment.yaml` | Includes management UI port |
-| user-management | Deployment (2 replicas) | `backend` | `k8s/backend/user-management-deployment.yaml` | JWT Secret from K8s Secret |
-| doctor-appointment | Deployment (2 replicas) | `backend` | `k8s/backend/doctor-appointment-deployment.yaml` | RabbitMQ publisher |
-| pharmacy | Deployment (2 replicas) | `backend` | `k8s/backend/pharmacy-deployment.yaml` | Python Flask |
-| medical-records | Deployment (2 replicas) | `backend` | `k8s/backend/medical-records-deployment.yaml` | RabbitMQ consumer |
-| lab-appointment | Deployment (2 replicas) | `backend` | `k8s/backend/lab-ambulance-deployments.yaml` | RabbitMQ publisher |
-| ambulance-booking | Deployment (2 replicas) | `backend` | `k8s/backend/lab-ambulance-deployments.yaml` | RabbitMQ publisher |
-| aggregator | Deployment (2 replicas) | `backend` | `k8s/backend/aggregator-deployment.yaml` | Calls 3 other services |
-| All backend | ClusterIP Services (×7) | `backend` | `k8s/backend/services.yaml` | Internal-only access |
-| frontend | Deployment (2 replicas) | `frontend` | `k8s/frontend/frontend-deployment.yaml` | React build |
-| frontend | NodePort Service (30000) | `frontend` | `k8s/frontend/frontend-service.yaml` | Initial phase access |
-| Gateway | GatewayClass | cluster-scoped | `k8s/gateway/gateway-class.yaml` | Envoy Gateway controller |
+| Component | K8s Resource | Namespace | YAML File | Key Concepts |
+|-----------|-------------|-----------|-----------|-------------|
+| MongoDB | StatefulSet (1 replica) | `infra` | `k8s/infra/mongodb-statefulset.yaml` | Init container, dynamic PVC, headless service |
+| MongoDB Storage | PV (hostPath + NFS ref) | `infra` | `k8s/infra/mongodb-pv-pvc.yaml` | PV, PVC, nodeAffinity |
+| MongoDB Services | Headless + ClusterIP | `infra` | `k8s/infra/mongodb-service.yaml` | Headless for stable DNS |
+| RabbitMQ | Deployment (1 replica) | `infra` | `k8s/infra/rabbitmq-deployment.yaml` | Probes, resource limits |
+| NFS Provisioner | Deployment + RBAC | `infra` | `k8s/storage/nfs-provisioner.yaml` | ServiceAccount, ClusterRole, ClusterRoleBinding |
+| StorageClasses | StorageClass (×2) | cluster | `k8s/storage/storageclass.yaml` | Dynamic provisioning, volumeBindingMode |
+| user-management | Deployment (2 replicas) | `backend` | `k8s/backend/user-management-deployment.yaml` | **Init containers** (MongoDB + RabbitMQ wait) |
+| doctor-appointment | Deployment (2 replicas) | `backend` | `k8s/backend/doctor-appointment-deployment.yaml` | **Sidecar** (log forwarder), init container, shared emptyDir |
+| pharmacy | Deployment (2 replicas) | `backend` | `k8s/advanced/deployment-strategies.yaml` | **RollingUpdate** strategy, HPA |
+| medical-records | Deployment (2 replicas) | `backend` | `k8s/advanced/deployment-strategies.yaml` | **Recreate** strategy |
+| lab-appointment | Deployment (2 replicas) | `backend` | `k8s/backend/lab-ambulance-deployments.yaml` | Standard deployment |
+| ambulance-booking | Deployment (2 replicas) | `backend` | `k8s/backend/lab-ambulance-deployments.yaml` | Standard deployment |
+| All backend | ClusterIP Services (×6) | `backend` | `k8s/backend/services.yaml` | Internal-only access |
+| frontend | Deployment (2 replicas) | `frontend` | `k8s/frontend/frontend-deployment.yaml` | React static build |
+| frontend | NodePort Service (30000) | `frontend` | `k8s/frontend/frontend-service.yaml` | External access |
+| Log Agent | **DaemonSet** | `infra` | `k8s/advanced/daemonset-log-agent.yaml` | Runs on every node, tolerates control plane |
+| Monitor | **Static Pod** | `infra` | `k8s/advanced/static-pod-example.yaml` | Kubelet-managed, no API server dependency |
+| Scaling | HPA (×2) | `backend` | `k8s/advanced/scaling-examples.yaml` | CPU + memory triggers, custom behavior |
+| Gateway | GatewayClass | cluster | `k8s/gateway/gateway-class.yaml` | Envoy Gateway controller |
 | Gateway | Gateway | `ingress` | `k8s/gateway/gateway.yaml` | Port 80, NodePort 30080 |
-| Routes | HTTPRoute (×7) | `backend` | `k8s/gateway/httproutes.yaml` | Path-based routing |
+| Routes | HTTPRoute (×6) | `backend` | `k8s/gateway/httproutes.yaml` | Path-based routing |
 | Config | ConfigMap (×3) | all | `k8s/config/configmaps.yaml` | Non-sensitive config |
 | Secrets | Secret (×2) | `backend`, `infra` | `k8s/config/secrets.yaml` | JWT, MongoDB creds |
 
-## Resource Specifications
+## K8s Concepts Demonstrated
 
-All backend services:
-- **CPU**: request 100m, limit 250m
-- **Memory**: request 128Mi, limit 256Mi
-- **Probes**: HTTP GET `/health` (liveness + readiness)
-- **Replicas**: 2
-
-MongoDB:
-- **CPU**: request 250m, limit 500m
-- **Memory**: request 256Mi, limit 512Mi
-- **Storage**: 5Gi hostPath PV
-
-## Scheduling Resources
-| File | Concepts Demonstrated |
-|------|----------------------|
-| `k8s/scheduling/node-affinity-example.yaml` | `nodeAffinity`, `podAntiAffinity`, `nodeSelector` |
-| `k8s/scheduling/taints-tolerations-example.yaml` | `tolerations` (NoSchedule, NoExecute), `tolerationSeconds` |
-| `k8s/scheduling/failure-scenarios.yaml` | Bad image, wrong Secret, impossible selector, OOMKill, bad probe |
+| Concept | Where Demonstrated |
+|---------|-------------------|
+| Pods, ReplicaSets, Deployments | All backend services |
+| StatefulSet | MongoDB (`k8s/infra/mongodb-statefulset.yaml`) |
+| DaemonSet | Log agent (`k8s/advanced/daemonset-log-agent.yaml`) |
+| Static Pod | Monitor (`k8s/advanced/static-pod-example.yaml`) |
+| Init Containers | user-management, doctor-appointment, pharmacy, medical-records |
+| Multi-Container (Sidecar) | doctor-appointment with log-forwarder |
+| ConfigMaps | Backend, frontend, infra configs (`k8s/config/`) |
+| Secrets | JWT + MongoDB credentials (`k8s/config/secrets.yaml`) |
+| Liveness Probes | All services (HTTP GET `/health`) |
+| Readiness Probes | All services (HTTP GET `/health`) |
+| StorageClass | `standard-local` + `nfs-dynamic` (`k8s/storage/`) |
+| PV / PVC | MongoDB data storage |
+| Dynamic Provisioning | NFS provisioner → auto PV creation |
+| ClusterIP | All 6 backend services |
+| NodePort | Frontend (30000), Gateway (30080) |
+| Gateway API | GatewayClass + Gateway + 6 HTTPRoutes |
+| nodeAffinity | `k8s/scheduling/node-affinity-example.yaml` |
+| podAntiAffinity | `k8s/scheduling/node-affinity-example.yaml` |
+| Taints & Tolerations | `k8s/scheduling/taints-tolerations-example.yaml`, DaemonSet |
+| RollingUpdate | Pharmacy deployment |
+| Recreate | Medical-records deployment |
+| Rollback | `kubectl rollout undo` (documented) |
+| HPA | Pharmacy + doctor-appointment |
+| Namespaces | `frontend`, `backend`, `infra`, `ingress` |
+| RBAC (ServiceAccount) | NFS provisioner (`k8s/storage/nfs-provisioner.yaml`) |
+| Failure Scenarios | 5 scenarios (`k8s/scheduling/failure-scenarios.yaml`) |

@@ -1,0 +1,44 @@
+# ════════════════════════════════════════════════════
+# Dynamic Provisioning StorageClasses
+# ════════════════════════════════════════════════════
+#
+# WHY: Static hostPath PVs require an admin to manually create PVs
+# before a PVC can bind. Dynamic provisioning automates this —
+# when a PVC is created, the StorageClass provisioner automatically
+# creates the underlying PV.
+#
+# HOW IT WORKS:
+# 1. Admin creates StorageClass (once)
+# 2. Developer creates PVC referencing the StorageClass
+# 3. Provisioner creates PV automatically
+# 4. PVC binds to the new PV
+# 5. Pod mounts the PVC
+#
+# FLOW: PVC → StorageClass → Provisioner → PV (auto-created) → PVC binds
+
+# ─── Option A: Standard Local StorageClass (single-node learning) ───
+# Uses no-provisioner — PVs still need to be created manually
+# but this teaches the StorageClass → PVC binding mechanism
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: standard-local
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer  # Delays PV binding until Pod is scheduled
+reclaimPolicy: Retain
+---
+# ─── Option B: NFS Dynamic StorageClass ───
+# Uses nfs-subdir-external-provisioner to dynamically create
+# subdirectories on an NFS share for each PVC
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-dynamic
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"  # Makes this the default
+provisioner: nfs-subdir-external-provisioner
+parameters:
+  archiveOnDelete: "true"   # Move data to archive instead of deleting
+  pathPattern: "${.PVC.namespace}-${.PVC.name}"  # Readable directory names
+reclaimPolicy: Retain
+volumeBindingMode: Immediate

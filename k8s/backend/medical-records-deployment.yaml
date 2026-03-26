@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: medical-records
-          image: revanth654/healthcare-medical-records:latest
+          image: revanth654/healthcare-medical-records:v2
           imagePullPolicy: Always
           ports:
             - containerPort: 5002

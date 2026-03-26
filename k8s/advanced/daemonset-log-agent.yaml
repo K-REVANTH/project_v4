@@ -1,0 +1,110 @@
+# ════════════════════════════════════════════════════
+# DaemonSet — Node-Level Log Agent
+# ════════════════════════════════════════════════════
+#
+# WHY: A DaemonSet ensures exactly one pod runs on EVERY node.
+# Perfect for:
+# - Log collection (Fluent Bit reads /var/log from every node)
+# - Monitoring agents (node-exporter, datadog-agent)
+# - Network agents (calico, kube-proxy)
+#
+# HOW this differs from a Deployment:
+# - Deployment: "run N replicas wherever the scheduler decides"
+# - DaemonSet: "run exactly one pod on EVERY node that matches"
+# - When a new node joins → DaemonSet automatically creates a pod on it
+# - When a node is removed → the pod is garbage collected
+#
+# This example uses Fluent Bit as a lightweight log collector.
+# It reads container logs from /var/log/containers/ and node logs
+# from /var/log/ and forwards them to stdout (or Elasticsearch in prod).
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: log-agent
+  namespace: infra
+  labels:
+    app: log-agent
+spec:
+  selector:
+    matchLabels:
+      app: log-agent
+  template:
+    metadata:
+      labels:
+        app: log-agent
+    spec:
+      # Tolerate master node taint so log agent runs everywhere
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: fluent-bit
+          image: fluent/fluent-bit:2.2
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+            - name: containerlog
+              mountPath: /var/log/containers
+              readOnly: true
+            - name: fluent-bit-config
+              mountPath: /fluent-bit/etc/
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+      volumes:
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: containerlog
+          hostPath:
+            path: /var/log/containers
+        - name: fluent-bit-config
+          configMap:
+            name: fluent-bit-config
+---
+# ─── Fluent Bit Config ───
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config
+  namespace: infra
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush         5
+        Log_Level     info
+        Daemon        off
+
+    [INPUT]
+        Name          tail
+        Path          /var/log/containers/healthcare-*.log
+        Parser        docker
+        Tag           kube.*
+        Refresh_Interval  10
+
+    [OUTPUT]
+        Name          stdout
+        Match         *
+        Format        json_lines
+
+  parsers.conf: |
+    [PARSER]
+        Name          docker
+        Format        json
+        Time_Key      time
+        Time_Format   %Y-%m-%dT%H:%M:%S.%L

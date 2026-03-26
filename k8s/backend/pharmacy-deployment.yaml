@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: pharmacy
-          image: revanth654/healthcare-pharmacy:latest
+          image: revanth654/healthcare-pharmacy:v2
           imagePullPolicy: Always
           ports:
             - containerPort: 5001

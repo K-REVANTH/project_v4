@@ -21,9 +21,8 @@ function Labs() {
 
   const handleAdd = (e) => {
     e.preventDefault()
-    fetch('/api/labs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...addForm, price: Number(addForm.price), turnaroundDays: Number(addForm.turnaroundDays) })
-    }).then(r => r.json()).then(() => { setMessage({ type: 'success', text: 'Test added!' }); loadTests(); setShowAddForm(false) })
+    api.addLabTest({ ...addForm, price: Number(addForm.price), turnaroundDays: Number(addForm.turnaroundDays) })
+      .then(() => { setMessage({ type: 'success', text: 'Test added!' }); loadTests(); setShowAddForm(false) })
       .catch(err => setMessage({ type: 'error', text: err.message }))
   }
 

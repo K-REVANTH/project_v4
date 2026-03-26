@@ -1,0 +1,87 @@
+# ════════════════════════════════════════════════════
+# Scaling — Manual + Auto (HPA)
+# ════════════════════════════════════════════════════
+#
+# MANUAL SCALING:
+#   kubectl scale deployment/doctor-appointment --replicas=5 -n backend
+#   kubectl scale deployment/pharmacy --replicas=3 -n backend
+#
+# AUTO SCALING (HPA):
+# HPA monitors CPU/memory and adjusts replicas automatically.
+#
+# PREREQUISITE: metrics-server must be installed
+#   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+#
+# VERIFY metrics-server:
+#   kubectl top nodes
+#   kubectl top pods -n backend
+#
+# HPA COMMANDS:
+#   kubectl get hpa -n backend
+#   kubectl describe hpa pharmacy-hpa -n backend
+#
+# IMPERATIVE (quick, for learning):
+#   kubectl autoscale deployment/pharmacy --min=2 --max=6 --cpu-percent=70 -n backend
+
+# ─── Declarative HPA for Pharmacy ───
+# WHY pharmacy: it handles search queries that can spike under load
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pharmacy-hpa
+  namespace: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pharmacy
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70   # Scale up when avg CPU > 70%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80   # Also scale if memory usage > 80%
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30   # Wait 30s of sustained high CPU before scaling
+      policies:
+        - type: Pods
+          value: 2           # Add at most 2 pods per scale-up event
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 120  # Wait 2min of low CPU before scaling down
+      policies:
+        - type: Pods
+          value: 1           # Remove at most 1 pod per scale-down event
+          periodSeconds: 60
+---
+# ─── HPA for Doctor Appointment ───
+# Appointment booking can spike during business hours
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: doctor-appointment-hpa
+  namespace: backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: doctor-appointment
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75

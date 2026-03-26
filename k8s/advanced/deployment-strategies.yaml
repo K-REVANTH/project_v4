@@ -1,0 +1,180 @@
+# ════════════════════════════════════════════════════
+# Deployment Strategies + Rollback
+# ════════════════════════════════════════════════════
+#
+# Kubernetes supports two built-in strategies:
+#
+# 1. RollingUpdate (default):
+#    - Gradually replaces old pods with new ones
+#    - maxSurge: how many EXTRA pods can exist during update
+#    - maxUnavailable: how many pods can be DOWN during update
+#    - Zero-downtime if readiness probes are configured
+#
+# 2. Recreate:
+#    - Kills ALL old pods first, then creates new ones
+#    - Causes downtime — use for stateful apps that can't have 2 versions running
+#
+# ROLLBACK COMMANDS:
+#   kubectl rollout history deployment/pharmacy -n backend
+#   kubectl rollout undo deployment/pharmacy -n backend
+#   kubectl rollout undo deployment/pharmacy -n backend --to-revision=2
+#   kubectl rollout status deployment/pharmacy -n backend
+#
+# TRIGGER UPDATE:
+#   kubectl set image deployment/pharmacy pharmacy=healthcare/pharmacy:v2 -n backend
+#   # Or edit the YAML and kubectl apply -f
+
+# ─── Strategy 1: RollingUpdate (recommended for stateless services) ───
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pharmacy
+  namespace: backend
+  labels:
+    app: pharmacy
+    tier: backend
+  annotations:
+    kubernetes.io/change-cause: "Initial deployment" # Appears in rollout history
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5 # Keep 5 old ReplicaSets for rollback
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1 # Allow 1 extra pod during update (total 3)
+      maxUnavailable: 0 # Never have 0 ready pods — truly zero-downtime
+  selector:
+    matchLabels:
+      app: pharmacy
+  template:
+    metadata:
+      labels:
+        app: pharmacy
+        tier: backend
+    spec:
+      initContainers:
+        - name: wait-for-mongodb
+          image: busybox:1.36
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z mongodb-headless.infra.svc.cluster.local 27017; do sleep 2; done",
+            ]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }
+      containers:
+        - name: pharmacy
+          image: revanth654/healthcare-pharmacy:v2
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5001
+          env:
+            - name: PORT
+              value: "5001"
+            - name: MONGO_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: MONGO_URI
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 15
+            periodSeconds: 5
+      restartPolicy: Always
+---
+# ─── Strategy 2: Recreate (for comparison / stateful services) ───
+# Kills all old pods before creating new ones.
+# Use when you CANNOT have two versions running simultaneously
+# (e.g., database migrations, singleton processes).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: medical-records
+  namespace: backend
+  labels:
+    app: medical-records
+    tier: backend
+  annotations:
+    kubernetes.io/change-cause: "Initial deployment"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: Recreate # All pods killed, then new ones created
+  selector:
+    matchLabels:
+      app: medical-records
+  template:
+    metadata:
+      labels:
+        app: medical-records
+        tier: backend
+    spec:
+      initContainers:
+        - name: wait-for-mongodb
+          image: busybox:1.36
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z mongodb-headless.infra.svc.cluster.local 27017; do sleep 2; done",
+            ]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }
+      containers:
+        - name: medical-records
+          image: revanth654/healthcare-medical-records:v2
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5002
+          env:
+            - name: PORT
+              value: "5002"
+            - name: MONGO_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: MONGO_URI
+            - name: RABBITMQ_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: RABBITMQ_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5002
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5002
+            initialDelaySeconds: 15
+            periodSeconds: 5
+      restartPolicy: Always

@@ -78,6 +78,6 @@ spec:
           tolerationSeconds: 60 # Stay on the node for 60s after taint applied
       containers:
         - name: user-management
-          image: revanth654/healthcare-user-management:latest
+          image: revanth654/healthcare-user-management:v2
           ports:
             - containerPort: 3001

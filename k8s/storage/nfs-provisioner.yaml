@@ -1,0 +1,115 @@
+# ════════════════════════════════════════════════════
+# NFS Dynamic Provisioner
+# ════════════════════════════════════════════════════
+#
+# PREREQUISITES:
+# 1. NFS server running (can be on a separate EC2 instance or on the master node)
+#    Setup NFS server on Ubuntu:
+#      sudo apt install nfs-kernel-server
+#      sudo mkdir -p /srv/nfs/k8s-data
+#      sudo chown nobody:nogroup /srv/nfs/k8s-data
+#      sudo chmod 777 /srv/nfs/k8s-data
+#      # Add to /etc/exports:
+#      #   /srv/nfs/k8s-data *(rw,sync,no_subtree_check,no_root_squash)
+#      sudo exportfs -ra
+#      sudo systemctl restart nfs-kernel-server
+#
+# 2. NFS client on all K8s worker nodes:
+#      sudo apt install nfs-common
+#
+# HOW IT WORKS:
+# - The provisioner pod watches for PVC creation
+# - When a PVC with storageClassName: nfs-dynamic is created
+# - Provisioner creates a subdirectory on the NFS share
+# - Creates a PV pointing to that subdirectory
+# - PVC binds to the PV automatically
+# - Pod can then mount the PVC
+#
+# Replace <NFS_SERVER_IP> with your NFS server IP address
+
+# ─── ServiceAccount ───
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nfs-provisioner
+  namespace: infra
+---
+# ─── ClusterRole ───
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nfs-provisioner-runner
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "update", "patch"]
+---
+# ─── ClusterRoleBinding ───
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nfs-provisioner-binding
+subjects:
+  - kind: ServiceAccount
+    name: nfs-provisioner
+    namespace: infra
+roleRef:
+  kind: ClusterRole
+  name: nfs-provisioner-runner
+  apiGroup: rbac.authorization.k8s.io
+---
+# ─── NFS Provisioner Deployment ───
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nfs-provisioner
+  namespace: infra
+  labels:
+    app: nfs-provisioner
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate    # Only one provisioner should run at a time
+  selector:
+    matchLabels:
+      app: nfs-provisioner
+  template:
+    metadata:
+      labels:
+        app: nfs-provisioner
+    spec:
+      serviceAccountName: nfs-provisioner
+      containers:
+        - name: nfs-provisioner
+          image: registry.k8s.io/sig-storage/nfs-subdir-external-provisioner:v4.0.2
+          env:
+            - name: PROVISIONER_NAME
+              value: nfs-subdir-external-provisioner
+            - name: NFS_SERVER
+              value: "<NFS_SERVER_IP>"          # ← Replace with your NFS server IP
+            - name: NFS_PATH
+              value: "/srv/nfs/k8s-data"        # ← Replace with your NFS export path
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: nfs-root
+              mountPath: /persistentvolumes
+      volumes:
+        - name: nfs-root
+          nfs:
+            server: "<NFS_SERVER_IP>"           # ← Replace with your NFS server IP
+            path: "/srv/nfs/k8s-data"           # ← Replace with your NFS export path

@@ -51,7 +51,7 @@ spec:
     spec:
       containers:
         - name: broken
-          image: revanth654/healthcare-user-management:latest
+          image: revanth654/healthcare-user-management:v2
           env:
             - name: JWT_SECRET
               valueFrom:
@@ -83,9 +83,9 @@ spec:
         gpu: nvidia-a100 # No such node exists
       containers:
         - name: broken
-          image: revanth654/healthcare-aggregator:latest
+          image: revanth654/healthcare-lab-appointment:v2
           ports:
-            - containerPort: 3005
+            - containerPort: 3003
 ---
 # ─── Scenario 4: OOMKilled (very low memory limit) ───
 # Expected: Pod starts then gets OOMKilled
@@ -109,7 +109,7 @@ spec:
     spec:
       containers:
         - name: broken
-          image: revanth654/healthcare-user-management:latest
+          image: revanth654/healthcare-user-management:v2
           resources:
             limits:
               memory: 10Mi # Way too low for Node.js
@@ -137,13 +137,13 @@ spec:
     spec:
       containers:
         - name: broken
-          image: revanth654/healthcare-aggregator:latest
+          image: revanth654/healthcare-lab-appointment:v2
           ports:
-            - containerPort: 3005
+            - containerPort: 3003
           livenessProbe:
             httpGet:
               path: /nonexistent-health-endpoint
-              port: 3005
+              port: 3003
             initialDelaySeconds: 5
             periodSeconds: 3
             failureThreshold: 2

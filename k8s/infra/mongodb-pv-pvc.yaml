@@ -1,17 +1,55 @@
-# ─── PersistentVolume (hostPath for learning) ───
+# ════════════════════════════════════════════════════
+# PersistentVolume options for MongoDB
+# ════════════════════════════════════════════════════
+#
+# With dynamic provisioning (nfs-dynamic StorageClass),
+# you do NOT need to create PVs manually.
+# These are provided as learning references.
+
+# ─── Option A: hostPath PV (single-node dev only) ───
+# Use this if NOT using NFS / dynamic provisioning
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: mongodb-pv
+  name: mongodb-pv-hostpath
   labels:
     type: local
     app: mongodb
 spec:
-  storageClassName: manual
+  storageClassName: standard-local
   capacity:
     storage: 5Gi
   accessModes:
     - ReadWriteOnce
   hostPath:
     path: /mnt/data/mongodb
+  persistentVolumeReclaimPolicy: Retain
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - "<YOUR_NODE_NAME>"   # Required for local PVs
+---
+# ─── Option B: NFS PV (manual, for reference) ───
+# With nfs-dynamic StorageClass, the provisioner creates these automatically
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongodb-pv-nfs
+  labels:
+    type: nfs
+    app: mongodb
+spec:
+  storageClassName: nfs-dynamic
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+    - ReadWriteMany
+  nfs:
+    server: "<NFS_SERVER_IP>"
+    path: "/srv/nfs/k8s-data/mongodb"
   persistentVolumeReclaimPolicy: Retain

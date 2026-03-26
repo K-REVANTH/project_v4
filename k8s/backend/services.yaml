@@ -101,20 +101,3 @@ spec:
     - port: 3004
       targetPort: 3004
       protocol: TCP
----
-# Aggregator
-apiVersion: v1
-kind: Service
-metadata:
-  name: aggregator
-  namespace: backend
-  labels:
-    app: aggregator
-spec:
-  type: ClusterIP
-  selector:
-    app: aggregator
-  ports:
-    - port: 3005
-      targetPort: 3005
-      protocol: TCP

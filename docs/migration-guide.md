@@ -1,186 +1,204 @@
-# Migration Guide: Docker Compose → Kubernetes
+# Migration Guide: Docker Compose → Kubernetes (v2)
 
-## Step-by-Step Migration
+## Pre-Migration Checklist
 
-### Phase 1: Verify Docker Compose Works
+- [ ] All 6 services pass health checks locally
+- [ ] RBAC login/register works for all 3 roles
+- [ ] Docker images built and pushed to registry
+- [ ] kubeadm cluster running (master + 2 workers min)
+- [ ] NFS server configured (if using NFS storage)
+- [ ] Envoy Gateway installed
+
+---
+
+## Phase 1: Verify Docker Compose Works
 
 ```bash
-# 1. Build and start all services
+# Build and start all services (no aggregator)
 docker-compose up -d --build
 
-# 2. Verify all containers are running
+# Verify 8 containers running (2 infra + 6 services + frontend)
 docker-compose ps
 
-# 3. Test health endpoints
-curl http://localhost:3001/health  # user-management
-curl http://localhost:3002/health  # doctor-appointment
-curl http://localhost:5001/health  # pharmacy
-curl http://localhost:5002/health  # medical-records
-curl http://localhost:3003/health  # lab-appointment
-curl http://localhost:3004/health  # ambulance-booking
-curl http://localhost:3005/health  # aggregator
+# Test health endpoints
+for port in 3001 3002 3003 3004 5001 5002; do
+  curl -s http://localhost:$port/health | jq .
+done
 
-# 4. Open frontend
-open http://localhost:3000
+# Test RBAC: register + login
+curl -X POST http://localhost:3001/api/users/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Admin","email":"admin@test.com","password":"pass123","role":"admin"}'
 
-# 5. Clean up when done
+# Clean up
 docker-compose down
 ```
 
 ---
 
-### Phase 2: Build and Push Docker Images
+## Phase 2: Build and Push Docker Images
 
 ```bash
-# Tag images for your registry (e.g., Docker Hub or ECR)
 REGISTRY="your-dockerhub-username"
 
-# Build all images
-docker build -t $REGISTRY/healthcare-user-management:latest ./services/user-management
-docker build -t $REGISTRY/healthcare-doctor-appointment:latest ./services/doctor-appointment
-docker build -t $REGISTRY/healthcare-pharmacy:latest ./services/pharmacy
-docker build -t $REGISTRY/healthcare-medical-records:latest ./services/medical-records
-docker build -t $REGISTRY/healthcare-lab-appointment:latest ./services/lab-appointment
-docker build -t $REGISTRY/healthcare-ambulance-booking:latest ./services/ambulance-booking
-docker build -t $REGISTRY/healthcare-aggregator:latest ./services/aggregator
+# Build (no aggregator — 6 services + frontend)
+for svc in user-management doctor-appointment lab-appointment ambulance-booking; do
+  docker build -t $REGISTRY/healthcare-$svc:latest ./services/$svc
+done
+for svc in pharmacy medical-records; do
+  docker build -t $REGISTRY/healthcare-$svc:latest ./services/$svc
+done
 docker build -t $REGISTRY/healthcare-frontend:latest ./frontend
 
-# Push all images
-for svc in user-management doctor-appointment pharmacy medical-records lab-appointment ambulance-booking aggregator frontend; do
+# Push
+for svc in user-management doctor-appointment pharmacy medical-records lab-appointment ambulance-booking frontend; do
   docker push $REGISTRY/healthcare-$svc:latest
 done
 ```
 
-> ⚠️ Update the `image:` field in each K8s Deployment YAML to match your registry path.
+> ⚠️ Update `image:` in all K8s Deployment YAMLs to match your registry.
 
 ---
 
-### Phase 3: Setup kubeadm Cluster on AWS
+## Phase 3: Setup kubeadm Cluster
 
 ```bash
 # On all nodes (master + workers):
-# 1. Install container runtime (containerd)
-# 2. Install kubeadm, kubelet, kubectl
-# 3. Disable swap
-
-# On master node:
 sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+mkdir -p $HOME/.kube && sudo cp /etc/kubernetes/admin.conf $HOME/.kube/config
 
-# Set up kubectl
-mkdir -p $HOME/.kube
-sudo cp /etc/kubernetes/admin.conf $HOME/.kube/config
-
-# Install CNI (Calico or Flannel)
+# Install Flannel CNI
 kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
 
-# On worker nodes:
+# Join workers
 sudo kubeadm join <master-ip>:6443 --token <token> --discovery-token-ca-cert-hash <hash>
 
-# Verify
-kubectl get nodes
+# Install metrics-server (required for HPA)
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 ```
 
 ---
 
-### Phase 4: Install Gateway API + Envoy Gateway
+## Phase 4: Setup NFS Server (for dynamic storage)
 
 ```bash
-# Install Gateway API CRDs
+# On NFS server (can be master node or separate EC2):
+sudo apt install nfs-kernel-server
+sudo mkdir -p /srv/nfs/k8s-data
+sudo chown nobody:nogroup /srv/nfs/k8s-data
+sudo chmod 777 /srv/nfs/k8s-data
+
+# Add to /etc/exports:
+echo "/srv/nfs/k8s-data *(rw,sync,no_subtree_check,no_root_squash)" | sudo tee -a /etc/exports
+sudo exportfs -ra
+sudo systemctl restart nfs-kernel-server
+
+# On ALL worker nodes:
+sudo apt install nfs-common
+```
+
+---
+
+## Phase 5: Install Gateway API + Envoy Gateway
+
+```bash
 kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.0.0/standard-install.yaml
-
-# Install Envoy Gateway
 kubectl apply -f https://github.com/envoyproxy/gateway/releases/download/v1.0.0/install.yaml
-
-# Verify
 kubectl get gatewayclass
 ```
 
 ---
 
-### Phase 5: Apply K8s Manifests (Order Matters!)
+## Phase 6: Apply K8s Manifests (ORDER MATTERS!)
 
 ```bash
-# Step 1: Namespaces
+# Step 1: Namespaces (must exist before anything else)
 kubectl apply -f k8s/namespaces/namespaces.yaml
 
-# Step 2: Secrets & ConfigMaps (must exist before Deployments reference them)
+# Step 2: Storage (StorageClass before StatefulSets)
+kubectl apply -f k8s/storage/storageclass.yaml
+kubectl apply -f k8s/storage/nfs-provisioner.yaml
+
+# Step 3: Config (Secrets + ConfigMaps before Deployments reference them)
 kubectl apply -f k8s/config/secrets.yaml
 kubectl apply -f k8s/config/configmaps.yaml
 
-# Step 3: Infrastructure (MongoDB + RabbitMQ)
-kubectl apply -f k8s/infra/mongodb-pv-pvc.yaml
+# Step 4: Infrastructure (MongoDB + RabbitMQ)
+kubectl apply -f k8s/infra/mongodb-pv-pvc.yaml      # Only if using hostPath/manual
 kubectl apply -f k8s/infra/mongodb-statefulset.yaml
 kubectl apply -f k8s/infra/mongodb-service.yaml
 kubectl apply -f k8s/infra/rabbitmq-deployment.yaml
 
-# Wait for infra to be ready
+# Wait for infra
 kubectl -n infra get pods -w
-# Wait until mongodb-0 and rabbitmq pods show 1/1 Running
+# Wait until mongodb-0 = 1/1 Running and rabbitmq = 1/1 Running
 
-# Step 4: Backend Services
-kubectl apply -f k8s/backend/services.yaml
-kubectl apply -f k8s/backend/user-management-deployment.yaml
-kubectl apply -f k8s/backend/doctor-appointment-deployment.yaml
-kubectl apply -f k8s/backend/pharmacy-deployment.yaml
-kubectl apply -f k8s/backend/medical-records-deployment.yaml
+# Step 5: Backend Services
+kubectl apply -f k8s/backend/services.yaml                    # ClusterIP services
+kubectl apply -f k8s/backend/user-management-deployment.yaml  # Has init containers
+kubectl apply -f k8s/backend/doctor-appointment-deployment.yaml  # Has sidecar
+kubectl apply -f k8s/advanced/deployment-strategies.yaml      # Pharmacy + Medical Records
 kubectl apply -f k8s/backend/lab-ambulance-deployments.yaml
-kubectl apply -f k8s/backend/aggregator-deployment.yaml
 
-# Verify
+# Verify backend
 kubectl -n backend get pods
 kubectl -n backend get svc
 
-# Step 5: Frontend
+# Step 6: Frontend
 kubectl apply -f k8s/frontend/frontend-deployment.yaml
 kubectl apply -f k8s/frontend/frontend-service.yaml
 
-# Step 6: Gateway API routing
+# Step 7: Gateway routing (6 HTTPRoutes — no aggregator)
 kubectl apply -f k8s/gateway/gateway-class.yaml
 kubectl apply -f k8s/gateway/gateway.yaml
 kubectl apply -f k8s/gateway/httproutes.yaml
 
-# Verify
+# Step 8: Advanced (DaemonSet + HPA)
+kubectl apply -f k8s/advanced/daemonset-log-agent.yaml
+kubectl apply -f k8s/advanced/scaling-examples.yaml
+
+# Verify everything
+kubectl get pods -A
 kubectl -n ingress get gateway
 kubectl -n backend get httproute
+kubectl get hpa -n backend
 ```
 
 ---
 
-### Phase 6: Setup HAProxy (External EC2 Instance)
+## Phase 7: Setup HAProxy
 
 ```bash
-# Install HAProxy on a separate EC2 instance (or the same one)
-sudo apt-get install -y haproxy
-
-# Edit config
+sudo apt install haproxy
 sudo cp haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg
-
-# Replace <WORKER_NODE_IP> placeholders with actual EC2 private IPs
-sudo vi /etc/haproxy/haproxy.cfg
-
-# Restart
+# Replace <WORKER_NODE_IP> with actual IPs
 sudo systemctl restart haproxy
-sudo systemctl status haproxy
-
-# Test
-curl http://<haproxy-ip>/api/aggregator/health-check
 ```
 
 ---
 
-### Phase 7: Verify End-to-End
+## Phase 8: Verify End-to-End
 
 ```bash
-# Via HAProxy
-curl http://<haproxy-public-ip>/api/users/register \
+# Register admin
+curl -X POST http://<haproxy-ip>/api/users/register \
   -H "Content-Type: application/json" \
-  -d '{"name":"Test","email":"test@example.com","password":"pass123"}'
+  -d '{"name":"Admin","email":"admin@test.com","password":"pass123","role":"admin"}'
 
-curl http://<haproxy-public-ip>/api/doctors
-curl http://<haproxy-public-ip>/api/pharmacy/medicines
-curl http://<haproxy-public-ip>/api/aggregator/dashboard
+# Login
+TOKEN=$(curl -s -X POST http://<haproxy-ip>/api/users/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@test.com","password":"pass123"}' | jq -r .token)
 
-# Frontend (NodePort direct)
+# Test RBAC (admin-only endpoint)
+curl -H "Authorization: Bearer $TOKEN" http://<haproxy-ip>/api/users/all
+
+# Test services
+curl http://<haproxy-ip>/api/doctors
+curl http://<haproxy-ip>/api/pharmacy/medicines
+curl http://<haproxy-ip>/api/labs
+
+# Frontend
 open http://<worker-node-ip>:30000
 ```
 
@@ -189,27 +207,16 @@ open http://<worker-node-ip>:30000
 ## Debugging Cheatsheet
 
 ```bash
-# Check pod status in any namespace
-kubectl get pods -n backend
-kubectl get pods -n infra
-kubectl get pods -n frontend
-
-# Describe a failing pod
-kubectl describe pod <pod-name> -n <namespace>
-
-# View pod logs
-kubectl logs <pod-name> -n <namespace>
-kubectl logs <pod-name> -n <namespace> --previous  # for crashed pods
-
-# Check events
-kubectl get events -n <namespace> --sort-by='.lastTimestamp'
-
-# Exec into a pod
-kubectl exec -it <pod-name> -n <namespace> -- /bin/sh
-
-# Test internal DNS
-kubectl run dns-test --image=busybox --rm -it -- nslookup mongodb-headless.infra.svc.cluster.local
-
-# Port-forward for debugging
-kubectl port-forward svc/rabbitmq 15672:15672 -n infra  # Access RabbitMQ UI
+kubectl get pods -n backend                              # Pod status
+kubectl describe pod <pod> -n backend                    # Events + conditions
+kubectl logs <pod> -n backend                            # App logs
+kubectl logs <pod> -n backend -c log-forwarder           # Sidecar logs
+kubectl logs <pod> -n backend --previous                 # Crashed pod logs
+kubectl get events -n backend --sort-by='.lastTimestamp'  # Recent events
+kubectl exec -it <pod> -n backend -- /bin/sh             # Shell into pod
+kubectl port-forward svc/rabbitmq 15672:15672 -n infra   # RabbitMQ UI
+kubectl rollout history deployment/pharmacy -n backend   # Deployment history
+kubectl rollout undo deployment/pharmacy -n backend      # Rollback
+kubectl top pods -n backend                              # Resource usage
+kubectl get hpa -n backend                               # Auto-scaler status
 ```

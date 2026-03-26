@@ -1,0 +1,62 @@
+# ════════════════════════════════════════════════════
+# Static Pod Example
+# ════════════════════════════════════════════════════
+#
+# WHAT: Static pods are managed by the kubelet directly, NOT the API server.
+# They are defined as YAML files placed in the kubelet's manifest directory
+# (typically /etc/kubernetes/manifests/).
+#
+# WHY: Used for critical infrastructure that must run even if the API server 
+# is down. Kubernetes itself uses this for:
+# - kube-apiserver
+# - kube-controller-manager  
+# - kube-scheduler
+# - etcd
+# All of these are static pods on the control plane node.
+#
+# HOW TO USE THIS:
+# 1. SSH into a worker node
+# 2. Copy this file to: /etc/kubernetes/manifests/
+#      sudo cp static-pod-example.yaml /etc/kubernetes/manifests/
+# 3. kubelet detects it automatically and creates the pod
+# 4. Check: kubectl get pods -A | grep static
+# 5. You'll see: healthcare-monitor-<node-name>
+# 6. To remove: delete the file from /etc/kubernetes/manifests/
+#
+# KEY DIFFERENCES from regular pods:
+# - Not managed by Deployments/ReplicaSets
+# - Cannot be deleted via kubectl delete (it auto-restarts)
+# - Visible in kubectl get pods (mirror pod) but controlled by kubelet
+# - Always runs on the specific node where the file is placed
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: healthcare-monitor
+  namespace: infra
+  labels:
+    app: healthcare-monitor
+    type: static-pod
+spec:
+  containers:
+    - name: monitor
+      image: busybox:1.36
+      command:
+        - 'sh'
+        - '-c'
+        - |
+          echo "Static pod started on $(hostname) at $(date)"
+          while true; do
+            echo "[$(date)] Node health check: disk=$(df -h / | tail -1 | awk '{print $5}'), mem=$(free -m | awk '/^Mem:/{print $3"/"$2" MB"}')"
+            sleep 60
+          done
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 50m
+          memory: 32Mi
+  restartPolicy: Always
+  # hostNetwork allows the static pod to access node-level metrics
+  hostNetwork: false

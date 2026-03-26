@@ -1,4 +1,22 @@
-# ─── User Management Deployment ───
+# ════════════════════════════════════════════════════
+# Init Container Example — MongoDB Readiness Gate
+# ════════════════════════════════════════════════════
+#
+# WHY: In production, backend services crash if MongoDB isn't ready
+# when they start. A typical failure loop:
+#   1. Service starts → tries to connect to MongoDB → fails
+#   2. Service crashes → CrashLoopBackOff
+#   3. K8s restarts it → MongoDB still not ready → repeat
+#
+# SOLUTION: An init container blocks the main container from starting
+# until MongoDB is reachable. The pod stays in "Init" phase (not crash loop).
+#
+# HOW:
+# - Init container runs BEFORE the main app container
+# - It loops, trying to connect to MongoDB every 2 seconds
+# - Only when MongoDB responds does the init container exit
+# - Then the main app container starts (guaranteed MongoDB is alive)
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,9 +36,50 @@ spec:
         app: user-management
         tier: backend
     spec:
+      # ─── Init Container: Wait for MongoDB ───
+      initContainers:
+        - name: wait-for-mongodb
+          image: busybox:1.36
+          command:
+            - "sh"
+            - "-c"
+            - |
+              echo "Waiting for MongoDB at mongodb-headless.infra.svc.cluster.local:27017..."
+              until nc -z mongodb-headless.infra.svc.cluster.local 27017; do
+                echo "MongoDB not ready — retrying in 2s"
+                sleep 2
+              done
+              echo "MongoDB is reachable — proceeding to start application"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+        - name: wait-for-rabbitmq
+          image: busybox:1.36
+          command:
+            - "sh"
+            - "-c"
+            - |
+              echo "Waiting for RabbitMQ at rabbitmq.infra.svc.cluster.local:5672..."
+              until nc -z rabbitmq.infra.svc.cluster.local 5672; do
+                echo "RabbitMQ not ready — retrying in 2s"
+                sleep 2
+              done
+              echo "RabbitMQ is reachable — proceeding"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+      # ─── Main Container ───
       containers:
         - name: user-management
-          image: revanth654/healthcare-user-management:latest
+          image: revanth654/healthcare-user-management:v2
           imagePullPolicy: Always
           ports:
             - containerPort: 3001
