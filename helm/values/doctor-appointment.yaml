@@ -1,0 +1,65 @@
+# Doctor-appointment service values override
+serviceName: doctor-appointment
+namespace: backend
+
+image:
+  repository: revanth654/healthcare-doctor-appointment
+  tag: v2
+  pullPolicy: Always
+
+containerPort: 3002
+replicaCount: 2
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+env:
+  - name: PORT
+    value: "3002"
+  - name: MONGO_URI
+    valueFrom:
+      configMapKeyRef:
+        name: backend-config
+        key: MONGO_URI
+  - name: RABBITMQ_URL
+    valueFrom:
+      configMapKeyRef:
+        name: backend-config
+        key: RABBITMQ_URL
+  - name: JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: backend-secrets
+        key: JWT_SECRET
+
+service:
+  type: ClusterIP
+  port: 3002
+
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 10
+  readiness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 5
+
+initContainers:
+  waitForMongo: true
+  waitForRabbit: true
+
+serviceAccountName: backend-sa
+podAntiAffinity: true

@@ -1,21 +1,12 @@
-# ════════════════════════════════════════════════════
-# Init Container Example — MongoDB Readiness Gate
-# ════════════════════════════════════════════════════
-#
-# WHY: In production, backend services crash if MongoDB isn't ready
-# when they start. A typical failure loop:
-#   1. Service starts → tries to connect to MongoDB → fails
-#   2. Service crashes → CrashLoopBackOff
-#   3. K8s restarts it → MongoDB still not ready → repeat
-#
-# SOLUTION: An init container blocks the main container from starting
-# until MongoDB is reachable. The pod stays in "Init" phase (not crash loop).
-#
-# HOW:
-# - Init container runs BEFORE the main app container
-# - It loops, trying to connect to MongoDB every 2 seconds
-# - Only when MongoDB responds does the init container exit
-# - Then the main app container starts (guaranteed MongoDB is alive)
+# ════════════════════════════════════════════════════════════
+# User Management Deployment — 3-Node Optimized
+# ════════════════════════════════════════════════════════════
+# CONCEPTS DEMONSTRATED:
+# - Init Containers (wait for MongoDB + RabbitMQ)
+# - ServiceAccount (backend-sa)
+# - podAntiAffinity (spread replicas across worker nodes)
+# - Resource limits (strict for 3-node cluster)
+# - ConfigMap + Secret env injection
 
 apiVersion: apps/v1
 kind: Deployment
@@ -36,50 +27,47 @@ spec:
         app: user-management
         tier: backend
     spec:
-      # ─── Init Container: Wait for MongoDB ───
+      serviceAccountName: backend-sa
+      # ─── Spread replicas across worker nodes ───
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - user-management
+                topologyKey: kubernetes.io/hostname
+      # ─── Init Containers: dependency checks ───
       initContainers:
         - name: wait-for-mongodb
           image: busybox:1.36
           command:
-            - "sh"
-            - "-c"
-            - |
-              echo "Waiting for MongoDB at mongodb-headless.infra.svc.cluster.local:27017..."
-              until nc -z mongodb-headless.infra.svc.cluster.local 27017; do
-                echo "MongoDB not ready — retrying in 2s"
-                sleep 2
-              done
-              echo "MongoDB is reachable — proceeding to start application"
+            [
+              "sh",
+              "-c",
+              'echo "Waiting for MongoDB..."; until nc -z mongodb-headless.infra.svc.cluster.local 27017; do echo "MongoDB not ready"; sleep 2; done; echo "MongoDB OK"',
+            ]
           resources:
-            requests:
-              cpu: 10m
-              memory: 16Mi
-            limits:
-              cpu: 50m
-              memory: 32Mi
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }
         - name: wait-for-rabbitmq
           image: busybox:1.36
           command:
-            - "sh"
-            - "-c"
-            - |
-              echo "Waiting for RabbitMQ at rabbitmq.infra.svc.cluster.local:5672..."
-              until nc -z rabbitmq.infra.svc.cluster.local 5672; do
-                echo "RabbitMQ not ready — retrying in 2s"
-                sleep 2
-              done
-              echo "RabbitMQ is reachable — proceeding"
+            [
+              "sh",
+              "-c",
+              'echo "Waiting for RabbitMQ..."; until nc -z rabbitmq.infra.svc.cluster.local 5672; do echo "RabbitMQ not ready"; sleep 2; done; echo "RabbitMQ OK"',
+            ]
           resources:
-            requests:
-              cpu: 10m
-              memory: 16Mi
-            limits:
-              cpu: 50m
-              memory: 32Mi
-      # ─── Main Container ───
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }
       containers:
         - name: user-management
-          image: revanth654/healthcare-user-management:v2
+          image: revanth654/healthcare-user-management:v3
           imagePullPolicy: Always
           ports:
             - containerPort: 3001

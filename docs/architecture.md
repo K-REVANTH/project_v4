@@ -1,120 +1,92 @@
-# Architecture Overview (v2)
+# Healthcare Microservices — Architecture (3-Node Cluster)
 
 ## System Architecture
 
 ```
-                        ┌─────────────┐
-                        │   Browser   │
-                        └──────┬──────┘
-                               │ :80
-                        ┌──────▼──────┐
-                        │   HAProxy   │  (EC2 / external to K8s)
-                        │  (L7 LB)   │
-                        └──────┬──────┘
-                               │ NodePort :30080
-                 ┌─────────────▼─────────────┐
-                 │  K8s Gateway (envoy-gw)    │  ns: ingress
-                 │  GatewayClass + Gateway    │
-                 └─────────────┬─────────────┘
-          HTTPRoutes (path-based routing)
-       ┌───────┬───────┬───────┬───────┬───────┬───────┐
-       │       │       │       │       │       │       │
-    /api/    /api/   /api/   /api/   /api/   /api/
-    users  doctors pharmacy records  labs   ambulance
-       ▼       ▼       ▼       ▼       ▼       ▼
-  ┌────────┬────────┬────────┬────────┬────────┬────────┐
-  │ User   │Doctor  │Pharmacy│Medical │ Lab    │Ambulnce│  ns: backend
-  │ Mgmt   │Appt    │Service │Records │ Appt   │Booking │
-  │(Node)  │(Node)  │(Python)│(Python)│(Node)  │(Node)  │
-  │ +init  │ +init  │ +init  │ +init  │        │        │
-  │        │+sidecar│        │        │        │        │
-  └──┬─────┴──┬─────┴──┬─────┴──┬─────┴──┬─────┴──┬────┘
-     │        │        │        │        │        │
-     └────────┴────────┴───┬────┴────────┴────────┘
-                           │
-              ┌────────────┼─────────────┐
-              ▼                          ▼
-     ┌──────────────┐          ┌──────────────┐    ns: infra
-     │   MongoDB    │          │  RabbitMQ    │
-     │ (StatefulSet)│          │ (Deployment) │
-     │ NFS Storage  │          │              │
-     └──────────────┘          └──────────────┘
-
-  Frontend (React) ── ns: frontend ── NodePort :30000
-  DaemonSet (Fluent Bit log agent) ── every node
+                    ┌──────────────────────────────┐
+                    │     MASTER NODE (EC2 #1)     │
+                    │                              │
+                    │  ┌─────────┐  ┌───────────┐  │
+                    │  │ HAProxy │  │ NFS Server│  │
+                    │  │ (host)  │  │ (host)    │  │
+                    │  │ :80,:3K │  │ /srv/nfs  │  │
+                    │  └────┬────┘  └───────────┘  │
+                    │       │                      │
+                    │  K8s Control Plane            │
+                    │  (kube-apiserver, etcd,       │
+                    │   scheduler, controller-mgr)  │
+                    │                              │
+                    │  Pod: log-agent (DaemonSet)   │
+                    └───────┬──────────────────────┘
+                            │ :30080 / :30000
+              ┌─────────────┴─────────────┐
+              ▼                           ▼
+┌──────────────────────┐   ┌──────────────────────┐
+│  WORKER-1 (EC2 #2)   │   │  WORKER-2 (EC2 #3)   │
+│  label: role=database │   │  label: role=worker   │
+│                       │   │                       │
+│ ┌───────────────────┐ │   │ ┌───────────────────┐ │
+│ │ Gateway (Envoy)   │ │   │ │ Gateway (Envoy)   │ │
+│ │ NodePort :30080   │ │   │ │ NodePort :30080   │ │
+│ └─────────┬─────────┘ │   │ └─────────┬─────────┘ │
+│           │            │   │           │            │
+│ Backend Pods:          │   │ Backend Pods:          │
+│ • user-management     │   │ • user-management     │
+│ • doctor-appointment  │   │ • doctor-appointment  │
+│ • pharmacy            │   │ • pharmacy            │
+│ • lab-appointment     │   │ • lab-appointment     │
+│ • ambulance-booking   │   │ • ambulance-booking   │
+│ • medical-records     │   │ • medical-records     │
+│                       │   │                       │
+│ Infra Pods:           │   │ Frontend:             │
+│ • MongoDB (pinned)    │   │ • React app :30000    │
+│ • RabbitMQ            │   │                       │
+│ • NFS Provisioner     │   │ Monitoring:           │
+│                       │   │ • Prometheus :30090   │
+│ • log-agent (DS)      │   │ • Grafana :30030      │
+│ • frontend replica    │   │ • log-agent (DS)      │
+└───────────────────────┘   └───────────────────────┘
 ```
 
-## RBAC Flow
-
+## Traffic Flow
 ```
-                    ┌─────────────────┐
-                    │  Login / Register│
-                    │  (role selection)│
-                    └────────┬────────┘
-                             │ JWT { id, role, name }
-              ┌──────────────┼──────────────┐
-              ▼              ▼              ▼
-       ┌──────────┐   ┌──────────┐   ┌──────────┐
-       │ PATIENT  │   │  DOCTOR  │   │  ADMIN   │
-       └────┬─────┘   └────┬─────┘   └────┬─────┘
-            │              │              │
-  ┌─────────▼─────────┐   │    ┌─────────▼─────────┐
-  │ PatientDashboard  │   │    │ AdminDashboard    │
-  │ - My appointments │   │    │ - All users       │
-  │ - My lab bookings │   │    │ - System stats    │
-  │ - My records      │   │    │ - Role management │
-  │ - Ambulance req   │   │    │ - Full access     │
-  └───────────────────┘   │    └───────────────────┘
-                    ┌─────▼─────────┐
-                    │DoctorDashboard│
-                    │ - My schedule │
-                    │ - My patients │
-                    │ - View records│
-                    └───────────────┘
+Internet → HAProxy (:80) → K8s Gateway (:30080) → HTTPRoutes → Backend Services
+Internet → HAProxy (:3000) → Frontend NodePort (:30000) → React App
 ```
 
-## Role-Access Matrix
+## Namespace Layout
+| Namespace | Contents | Node Placement |
+|-----------|----------|----------------|
+| `backend` | 6 microservices (2 replicas each) | Both workers |
+| `infra` | MongoDB, RabbitMQ, NFS provisioner, Fluent Bit | Worker-1 (MongoDB pinned) |
+| `frontend` | React frontend (2 replicas) | Both workers |
+| `ingress` | Envoy Gateway | Both workers |
+| `monitoring` | Prometheus, Grafana | Worker-2 |
 
-| Endpoint | Patient | Doctor | Admin |
-|----------|---------|--------|-------|
-| `POST /api/users/register` | ✅ Public | ✅ Public | ✅ Public |
-| `POST /api/users/login` | ✅ Public | ✅ Public | ✅ Public |
-| `GET /api/users/me` | ✅ Own | ✅ Own | ✅ Own |
-| `GET /api/users/all` | ❌ | ❌ | ✅ |
-| `DELETE /api/users/:id` | ❌ | ❌ | ✅ |
-| `GET /api/doctors` | ✅ List | ✅ List | ✅ List |
-| `POST /api/doctors` | ❌ | ❌ | ✅ |
-| `POST /api/doctors/book` | ✅ Self | ❌ | ✅ Any |
-| `GET /api/doctors/appointments/list` | ✅ Own | ✅ Assigned | ✅ All |
-| `GET /api/pharmacy/medicines` | ✅ | ✅ | ✅ |
-| `POST /api/pharmacy/medicines` | ❌ | ❌ | ✅ |
-| `GET /api/records/:patientId` | ✅ Own | ✅ Any | ✅ Any |
-| `POST /api/labs/book` | ✅ Self | ❌ | ✅ Any |
-| `POST /api/ambulance/request` | ✅ | ❌ | ✅ |
+## Resource Budget (per worker node ~4 vCPU, 8GB RAM)
 
-## Service Interaction Flows
+| Component | CPU Req | Mem Req | Replicas | Total CPU | Total Mem |
+|-----------|---------|---------|----------|-----------|-----------|
+| Backend services (×6) | 100m | 128Mi | 2 each | 1200m | 1536Mi |
+| MongoDB | 200m | 256Mi | 1 | 200m | 256Mi |
+| RabbitMQ | 200m | 256Mi | 1 | 200m | 256Mi |
+| Frontend | 50m | 64Mi | 2 | 100m | 128Mi |
+| Prometheus | 100m | 256Mi | 1 | 100m | 256Mi |
+| Grafana | 50m | 128Mi | 1 | 50m | 128Mi |
+| NFS Provisioner | 50m | 64Mi | 1 | 50m | 64Mi |
+| Fluent Bit (DS) | 50m | 64Mi | 3 | 150m | 192Mi |
+| Init containers | 10m | 16Mi | temp | ~0 | ~0 |
+| **TOTAL** | | | | **~2050m** | **~2816Mi** |
 
-### Synchronous (REST via Gateway)
-```
-Frontend → Gateway → user-management     (auth, profiles, RBAC)
-Frontend → Gateway → doctor-appointment  (list, book, cancel)
-Frontend → Gateway → pharmacy            (browse, search, add)
-Frontend → Gateway → medical-records     (view history)
-Frontend → Gateway → lab-appointment     (browse, book)
-Frontend → Gateway → ambulance-booking   (request, status)
-```
+> Fits comfortably on 2× t3.medium (2 vCPU, 4GB each) or t3.large (2 vCPU, 8GB)
 
-### Asynchronous (RabbitMQ)
-```
-doctor-appointment  ──publish──▶  "appointment.booked"  ──consume──▶  medical-records
-lab-appointment     ──publish──▶  "lab.booked"          ──consume──▶  medical-records
-ambulance-booking   ──publish──▶  "ambulance.requested" ──consume──▶  user-management
-```
+## Key Design Decisions (3-Node Constraint)
 
-## Namespaces
-| Namespace | Contents |
-|-----------|----------|
-| `frontend` | React frontend Deployment + NodePort Service |
-| `backend` | 6 microservice Deployments + ClusterIP Services |
-| `infra` | MongoDB StatefulSet + RabbitMQ + NFS Provisioner + DaemonSet |
-| `ingress` | Gateway + GatewayClass |
+| Decision | Why | Trade-off |
+|----------|-----|-----------|
+| HAProxy on master (host-level) | No extra EC2, runs outside K8s | Shares master resources |
+| NFS on master node | No extra EC2 for storage server | Master disk I/O shared |
+| MongoDB pinned to worker-1 | Needs stable node for data | Less scheduling flexibility |
+| 2 replicas per service | Max HA with 2 workers | Can't survive both workers down |
+| podAntiAffinity | Spread pods across nodes | Sometimes can't honor on 2 nodes |
+| Lightweight Prometheus | 256Mi limit (not 2GB) | 15-day retention, 30s scrape |

@@ -45,7 +45,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: pharmacy
-          image: revanth654/healthcare-pharmacy:latest
+          image: revanth654/healthcare-pharmacy:v3
           ports:
             - containerPort: 5001
           resources:
@@ -84,6 +84,6 @@ spec:
         disk: ssd
       containers:
         - name: lab-appointment
-          image: revanth654/healthcare-lab-appointment:v2
+          image: revanth654/healthcare-lab-appointment:v3
           ports:
             - containerPort: 3003

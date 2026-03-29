@@ -18,9 +18,34 @@ spec:
         app: lab-appointment
         tier: backend
     spec:
+      serviceAccountName: backend-sa
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - lab-appointment
+                topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: wait-for-mongodb
+          image: busybox:1.36
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z mongodb-headless.infra.svc.cluster.local 27017; do sleep 2; done",
+            ]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }
       containers:
         - name: lab-appointment
-          image: revanth654/healthcare-lab-appointment:v2
+          image: revanth654/healthcare-lab-appointment:v3
           imagePullPolicy: Always
           ports:
             - containerPort: 3003
@@ -37,6 +62,11 @@ spec:
                 configMapKeyRef:
                   name: backend-config
                   key: RABBITMQ_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: JWT_SECRET
           resources:
             requests:
               cpu: 100m
@@ -78,9 +108,34 @@ spec:
         app: ambulance-booking
         tier: backend
     spec:
+      serviceAccountName: backend-sa
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - ambulance-booking
+                topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: wait-for-mongodb
+          image: busybox:1.36
+          command:
+            [
+              "sh",
+              "-c",
+              "until nc -z mongodb-headless.infra.svc.cluster.local 27017; do sleep 2; done",
+            ]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }
       containers:
         - name: ambulance-booking
-          image: revanth654/healthcare-ambulance-booking:v2
+          image: revanth654/healthcare-ambulance-booking:v3
           imagePullPolicy: Always
           ports:
             - containerPort: 3004
@@ -97,6 +152,11 @@ spec:
                 configMapKeyRef:
                   name: backend-config
                   key: RABBITMQ_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: JWT_SECRET
           resources:
             requests:
               cpu: 100m

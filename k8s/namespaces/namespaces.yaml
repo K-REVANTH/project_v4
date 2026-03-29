@@ -25,3 +25,10 @@ metadata:
   name: ingress
   labels:
     app.kubernetes.io/part-of: healthcare-platform
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: healthcare-platform

@@ -1,0 +1,88 @@
+# ════════════════════════════════════════════════════════════
+# VPA — Vertical Pod Autoscaler Examples
+# ════════════════════════════════════════════════════════════
+#
+# WHAT IS VPA:
+# Automatically adjusts CPU and memory REQUESTS for pods based on
+# actual usage. Unlike HPA (which adds more pods), VPA makes each
+# pod bigger or smaller.
+#
+# HPA vs VPA:
+# ┌──────────────────┬──────────────────────────────────────┐
+# │       HPA        │            VPA                       │
+# ├──────────────────┼──────────────────────────────────────┤
+# │ Scales OUT       │ Scales UP                            │
+# │ Adds more pods   │ Gives more CPU/memory to each pod    │
+# │ For stateless    │ For stateful or single-replica apps   │
+# │ Based on metrics │ Based on historical usage             │
+# │ No pod restart   │ Restarts pods to apply new limits     │
+# │ Use for: APIs    │ Use for: databases, workers           │
+# └──────────────────┴──────────────────────────────────────┘
+#
+# IMPORTANT: Do NOT use HPA and VPA on the SAME deployment
+# for the same metric (CPU). They will conflict.
+#
+# INSTALL VPA (required):
+#   git clone https://github.com/kubernetes/autoscaler.git
+#   cd autoscaler/vertical-pod-autoscaler
+#   ./hack/vpa-up.sh
+#
+# MODES:
+# - "Off":    VPA only recommends — does NOT change pods (safe for learning)
+# - "Auto":   VPA automatically adjusts requests and restarts pods
+# - "Initial": VPA sets requests only at pod creation time
+
+# ─── VPA for user-management (recommendation mode — safe) ───
+# WHY user-management: It's the auth service — usage is variable.
+# In "Off" mode, VPA collects data and gives recommendations
+# without actually changing anything. Safe for learning.
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: user-management-vpa
+  namespace: backend
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: user-management
+  updatePolicy:
+    updateMode: "Off"    # Only recommend, don't auto-apply
+  resourcePolicy:
+    containerPolicies:
+      - containerName: user-management
+        minAllowed:
+          cpu: 50m
+          memory: 64Mi
+        maxAllowed:
+          cpu: 500m
+          memory: 512Mi
+---
+# ─── VPA for MongoDB (auto mode — adjusts resources on restart) ───
+# WHY MongoDB: Database memory needs grow with data size.
+# In "Auto" mode, VPA will restart the pod and apply new limits.
+# Only appropriate for StatefulSets with persistent storage.
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: mongodb-vpa
+  namespace: infra
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: mongodb
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: mongodb
+        minAllowed:
+          cpu: 200m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 1000m
+          memory: 1Gi
+# ─── Check VPA recommendations ───
+# kubectl describe vpa user-management-vpa -n backend
+# kubectl get vpa -n backend -o yaml

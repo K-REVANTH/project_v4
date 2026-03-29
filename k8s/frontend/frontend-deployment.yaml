@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: revanth654/healthcare-frontend:v2
+          image: revanth654/healthcare-frontend:v3
           imagePullPolicy: Always
           ports:
             - containerPort: 3000

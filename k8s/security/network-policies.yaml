@@ -1,0 +1,115 @@
+# ════════════════════════════════════════════════════════════
+# Network Policies — Inter-Namespace Traffic Rules
+# ════════════════════════════════════════════════════════════
+#
+# WHY NETWORK POLICIES:
+# By default, ALL pods can talk to ALL other pods in K8s.
+# Network Policies act as firewalls — they restrict traffic to only
+# what is explicitly allowed. This follows the "least privilege" principle.
+#
+# HOW THEY WORK:
+# - Once you apply a NetworkPolicy to a namespace, all traffic NOT
+#   matching a rule is DENIED (deny-by-default for selected pods).
+# - You need a CNI plugin that supports NetworkPolicies
+#   (e.g., Calico, Cilium, Weave — NOT Flannel)
+#
+# PREREQUISITE: Install Calico CNI (instead of Flannel) on your cluster:
+#   kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml
+
+# ─── 1. Backend: Only accept traffic from Gateway (ingress namespace) ───
+# WHY: Backend services should NOT be directly accessible from outside.
+# Only the Gateway (Envoy) in the ingress namespace should route to them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-gateway-only
+  namespace: backend
+spec:
+  podSelector: {}        # Applies to ALL pods in backend namespace
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: healthcare-platform
+          podSelector: {}
+        # Also allow backend pods to talk to each other (inter-service)
+    - from:
+        - podSelector: {}    # Same namespace (backend → backend)
+---
+# ─── 2. Infra: Only accept traffic from backend namespace ───
+# WHY: MongoDB and RabbitMQ should only be reachable from backend services,
+# not from frontend or internet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: infra-allow-backend-only
+  namespace: infra
+spec:
+  podSelector:
+    matchLabels:
+      app: mongodb
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: backend
+      ports:
+        - port: 27017
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rabbitmq-allow-backend-only
+  namespace: infra
+spec:
+  podSelector:
+    matchLabels:
+      app: rabbitmq
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: backend
+      ports:
+        - port: 5672
+          protocol: TCP
+        - port: 15672
+          protocol: TCP
+---
+# ─── 3. Frontend: Allow inbound from anywhere (public-facing) ───
+# WHY: Frontend serves static files — needs to be reachable.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-allow-all-ingress
+  namespace: frontend
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - {}   # Allow all ingress (public-facing)
+---
+# ─── 4. Deny all other traffic in backend by default ───
+# WHY: Any pod that doesn't match a specific allow rule is blocked.
+# This ensures zero-trust networking inside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: backend
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+# When this exists alongside the allow rule above, the allow rule
+# takes precedence for matching pods. Everything else is denied.

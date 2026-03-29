@@ -1,0 +1,143 @@
+# ════════════════════════════════════════════════════════════
+# Kubernetes RBAC — ServiceAccounts, Roles, RoleBindings
+# ════════════════════════════════════════════════════════════
+#
+# WHAT IS K8s RBAC:
+# Controls WHO can do WHAT on WHICH K8s resources.
+# - ServiceAccount: identity for pods (like a "user" for applications)
+# - Role: defines permissions (get, list, watch pods/services etc.)
+# - RoleBinding: connects a ServiceAccount to a Role
+#
+# WHY:
+# Default ServiceAccount has minimal permissions. By creating custom
+# ServiceAccounts, we follow least-privilege — each namespace's pods
+# can only access the K8s API resources they actually need.
+#
+# HOW THIS DIFFERS FROM APPLICATION-LEVEL RBAC:
+# - App RBAC (patient/doctor/admin) = controls who can access REST APIs
+# - K8s RBAC (ServiceAccount/Role)  = controls what pods can do with K8s API
+
+# ═══════════════════════════════════════
+# 1. SERVICE ACCOUNTS — Pod Identity
+# ═══════════════════════════════════════
+
+# Backend services ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backend-sa
+  namespace: backend
+  labels:
+    app.kubernetes.io/part-of: healthcare-platform
+---
+# Monitoring ServiceAccount (used by Prometheus)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring-sa
+  namespace: infra
+  labels:
+    app.kubernetes.io/part-of: healthcare-platform
+---
+# Frontend ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend-sa
+  namespace: frontend
+  labels:
+    app.kubernetes.io/part-of: healthcare-platform
+
+---
+# ═══════════════════════════════════════
+# 2. ROLES — Define Permissions
+# ═══════════════════════════════════════
+
+# Backend Role: can view pods, services, configmaps in backend namespace
+# WHY: Allows backend pods to discover other services and read config
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: backend-role
+  namespace: backend
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]      # Can read secrets (for JWT_SECRET) but not list all
+---
+# Monitoring Role: can read pods/services across backend namespace
+# WHY: Prometheus needs to discover service endpoints for scraping
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: monitoring-backend-role
+  namespace: backend
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+---
+# Monitoring ClusterRole: read nodes, namespaces for cluster-wide metrics
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-cluster-role
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/metrics", "namespaces", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+
+---
+# ═══════════════════════════════════════
+# 3. ROLE BINDINGS — Connect SA to Role
+# ═══════════════════════════════════════
+
+# Backend pods → Backend Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backend-sa-binding
+  namespace: backend
+subjects:
+  - kind: ServiceAccount
+    name: backend-sa
+    namespace: backend
+roleRef:
+  kind: Role
+  name: backend-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Monitoring SA → read backend pods for scraping
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: monitoring-backend-binding
+  namespace: backend
+subjects:
+  - kind: ServiceAccount
+    name: monitoring-sa
+    namespace: infra
+roleRef:
+  kind: Role
+  name: monitoring-backend-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Monitoring SA → cluster-wide node metrics
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-cluster-binding
+subjects:
+  - kind: ServiceAccount
+    name: monitoring-sa
+    namespace: infra
+roleRef:
+  kind: ClusterRole
+  name: monitoring-cluster-role
+  apiGroup: rbac.authorization.k8s.io

@@ -1,18 +1,20 @@
-# ════════════════════════════════════════════════════
-# MongoDB StatefulSet — Dynamic Provisioning
-# ════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════
+# MongoDB StatefulSet — 3-Node Cluster Optimized
+# ════════════════════════════════════════════════════════════
 #
-# KEY CHANGES from v1:
-# 1. volumeClaimTemplates now use storageClassName: nfs-dynamic
-#    (was: storageClassName: manual with static PV)
-# 2. No manual PV creation needed — NFS provisioner handles it
-# 3. Added init container to verify NFS mount is working
+# DESIGN DECISIONS FOR 3-NODE CONSTRAINT:
+# 1. nodeAffinity: Pin MongoDB to worker-1 for stability
+#    (databases need consistent disk I/O — don't let scheduler move it)
+# 2. Label your target node: kubectl label node <worker-1> role=database
+# 3. Single replica (can't do replica set with only 2 workers)
 #
-# WHY StatefulSet over Deployment for databases:
-# - Stable network identity: mongodb-0, mongodb-1 (always the same)
-# - Ordered deployment: mongodb-0 starts before mongodb-1
-# - Persistent storage: each replica gets its own PVC that survives restarts
-# - Ordered deletion: mongodb-1 deleted before mongodb-0
+# WHY StatefulSet (not Deployment):
+# - Stable network identity: mongodb-0 (always the same pod name)
+# - Ordered startup/shutdown (safe for databases)
+# - Each replica gets its own PVC that survives restarts
+#
+# STORAGE: Uses NFS StorageClass for dynamic provisioning
+# NFS server runs on the master node (see scripts/setup-nfs.sh)
 
 apiVersion: apps/v1
 kind: StatefulSet
@@ -32,6 +34,17 @@ spec:
       labels:
         app: mongodb
     spec:
+      # ─── Pin MongoDB to a labeled node for stability ───
+      # Setup: kubectl label node <worker-node-1> role=database
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: role
+                    operator: In
+                    values:
+                      - database
       # ─── Init Container: verify storage is writable ───
       initContainers:
         - name: init-check-storage
@@ -59,7 +72,7 @@ spec:
                   key: MONGO_INITDB_ROOT_PASSWORD
           resources:
             requests:
-              cpu: 250m
+              cpu: 200m
               memory: 256Mi
             limits:
               cpu: 500m
@@ -86,14 +99,11 @@ spec:
           volumeMounts:
             - name: mongodb-data
               mountPath: /data/db
-  # ─── Dynamic PVC via volumeClaimTemplates ───
-  # Each replica gets its own PVC: mongodb-data-mongodb-0, mongodb-data-mongodb-1, etc.
-  # PVCs persist even if the StatefulSet is deleted
   volumeClaimTemplates:
     - metadata:
         name: mongodb-data
       spec:
-        storageClassName: nfs-dynamic   # Dynamic provisioning via NFS
+        storageClassName: nfs-dynamic
         accessModes:
           - ReadWriteOnce
         resources:

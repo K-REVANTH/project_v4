@@ -1,0 +1,84 @@
+# ═════════════════════════════════════════════════════
+# Default values for healthcare-service Helm chart
+# ═════════════════════════════════════════════════════
+# Override per service:
+#   helm install pharmacy ./helm/healthcare-service -f helm/values/pharmacy.yaml
+
+# Service identity
+serviceName: user-management
+namespace: backend
+
+# Container image
+image:
+  repository: revanth654/healthcare-user-management
+  tag: v2
+  pullPolicy: Always
+
+# Container port
+containerPort: 3001
+
+# Replicas (overridden by HPA if enabled)
+replicaCount: 2
+
+# Deployment strategy
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# Resource limits (3-node optimized)
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+# Environment variables from ConfigMaps/Secrets
+env:
+  - name: PORT
+    value: "3001"
+  - name: MONGO_URI
+    valueFrom:
+      configMapKeyRef:
+        name: backend-config
+        key: MONGO_URI
+  - name: RABBITMQ_URL
+    valueFrom:
+      configMapKeyRef:
+        name: backend-config
+        key: RABBITMQ_URL
+  - name: JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: backend-secrets
+        key: JWT_SECRET
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 3001
+
+# Probes
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 10
+  readiness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 5
+
+# Init containers
+initContainers:
+  waitForMongo: true
+  waitForRabbit: true
+
+# ServiceAccount
+serviceAccountName: backend-sa
+
+# Pod anti-affinity (spread across nodes)
+podAntiAffinity: true
